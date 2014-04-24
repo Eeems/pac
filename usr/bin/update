@@ -1,0 +1,10 @@
+#!/bin/bash
+if [ "$1" == "-f" ]; then
+	pac -I firefox-nightly;
+else
+	if [ "$1" == "-h" ]; then
+		echo -e "Checks for updates and asks for permission to update packages\n\t-h Displays this messages\n\t-f Updates firefox-nightly"
+	else
+		pac -U;
+	fi;
+fi;

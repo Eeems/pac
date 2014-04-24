@@ -1,0 +1,311 @@
+#!/bin/bash -e
+. /etc/pac.conf
+# copyright 2011 Nathaniel "Eeems" van Diepen
+# Colours
+CL='\\e['
+RS='\\e[0;0m'
+# Get Default package manager to wrap around.
+if [ "$PACKAGE_MANAGER" != "" ]; then
+	if [ "$PACKAGE_MANAGER" == "yaourt" ] || [ "$PACKAGE_MANAGER" == "pacaur" ];then
+		pacman=$PACKAGE_MANAGER;
+		export color=true;
+	else
+		pacman="sudo $PACKAGE_MANAGER";
+	fi;
+else
+	pacman="sudo pacman";
+fi;
+# Handle the default editor
+if [ "$EDITOR" == "" ]; then
+	if which nano > /dev/null; then
+		EDITOR="vi";
+	else
+		if which vi > /dev/null; then
+			EDITOR="nano";
+		else
+			if which gedit > /dev/null; then
+				EDITOR="gedit";
+			else
+				msg -m "Can't figure out what editor to use"
+				_exit;
+			fi;
+		fi;
+	fi;
+fi;
+# Handle the package cache directory
+if [ "$PAC_CACHE" == "" ]; then
+	PAC_CACHE="/tmp/pac";	
+fi;
+if [ ! -d $PAC_CACHE/$USER ]; then
+	mkdir -p $PAC_CACHE/$USER;
+fi;
+cache="$PAC_CACHE/$USER/"
+
+function _help(){
+# Help/Usage message
+	echo -e "pac - generic package manager wrapper
+  pac [options]
+	-h/--help			show this message	
+	-s/--stats			show the current statistics
+	-c <path>			set the cache to use
+	-p <command>			set the package manager to wrap
+	-U				attempts to update the system
+	-I \"<package> [<package> ...]\"	installs the package or packages
+	-i \"<package> [<package> ...]\"	installs local packages
+	-R \"<package> [<package> ...]\"	uninstalls packages
+	-S \"<string> [<string> ...]\"	searches the package databases
+	-Q \"<string> [<string> ...]\"	searches the local database of installed packages
+	-A \"<string> [<string> ...]\"	searches the aur
+	-a \"<string> [<string> ...]\"	Installs packages from the aur
+	-L				lists all installed packages
+	-l				lists all installed packages without extra data
+	-O				lists all the orphan packages
+	-C				clears user cache
+	-r				refreshes the databases
+	--optimize			attempt to optimize the system
+	--repo <repo>			lists all the packages in the specified repo
+  Alternate commands
+	pacs				pac -S
+	paci				pac -I
+	pacr				pac -R
+	pacq				pac -Q
+	update				pac -U
+	refresh				pac -r";
+}
+function _stats(){
+	# Display settings and statistics about the current system
+	# use generic pacman on orphan packages due to yaourt displaying extra messages
+	o="`pacman -Qm`"
+	echo -e "Current settings:
+	User:			$USER
+	Editor:			$EDITOR
+	Package Manager:	$PACKAGE_MANAGER
+	Cache:			$cache
+Statistics:
+	Installed Packages:	`$pacman -Q | wc -l`
+	Dependencies		`$pacman -Qd | wc -l`
+	Orphan Packages:	`echo "$(pacman -Qdt | grep -v "$o")" | wc -l`
+	Out of Date:		`$pacman -Qu | wc -l`
+	Foreign:		`$pacman -Qm | wc -l`
+	Available Packages	`$pacman -Ssq | wc -l`";
+	ls /var/lib/pacman/sync | while read dbp; do
+		db=${dbp:0:(-3)};
+		case "$db" in
+			core)
+				c="1;31"
+			;;
+			extra)
+				c="0;32"
+			;;
+			community)
+				c="1;35"
+			;;
+			archlinuxfr)
+				c="1;30"
+			;;
+			multilib)
+				c="0;33"
+			;;
+			omni)
+				c="0;34"
+			;;
+			\?)
+				c="0;36;"
+			;;
+		esac;
+		msg -a $c -A "				$db:" -m "`pacman -Sl $db | wc -l`";
+	done;
+}
+function _exit(){
+	exit 0;
+}
+function _error(){
+	exit 1;
+}
+# check if there are any arguements, display help and exit if there isn't
+if [ "`echo $@`" == "" ] || [ "`echo $1`" == "--help" ]; then
+	_help;
+	_error;
+elif [[ "$1" == "--optimize" ]]; then
+	rm $cache -rf
+	mkdir $cache -p
+	$pacman -Sc
+	sudo pacman-optimize
+	_exit;
+elif [[ "$1" == "--repo" ]]; then
+	if [[ "$2" != "" ]]; then
+		pacman -Sl $2 | awk '{print "\033[0m",$1,"\033[1;31m",$2,"\033[0m",$3,"\033[0;34m",$4,"\033[0m"; }';
+		_exit;
+	else
+		echo "Error: missing repo to list";
+	fi;
+elif [[ "$1" == "--stats" ]]; then
+	_stats;
+	_exit;
+fi;
+# Parse Arguements
+while getopts "Q:S:R:i:I:p:c:hsUlLOCr" optname; do
+	case "$optname" in
+		r)
+			sudo $pacman -Sy
+			o="`$pacman -Qu | wc -l`"
+			echo "$o out of date packages"
+			if [ "$o" != "0" ]; then
+				echo -n "Update? (Y/n): "
+				read r
+				if [ "$r" != "n" ]; then
+					if [ "$pacman" == "yaourt" ]; then
+						$pacman -Sua
+					else
+						$pacman -Su
+					fi;
+				fi;
+			fi;
+			_exit;
+		;;
+		p)
+			pacman="$OPTARG";
+		;;
+		c)
+			cache="$OPTARG";
+			if [ ! -d $cache/$USER ]; then
+				mkdir -p $cache/$USER;
+			fi;
+		;;
+		C)
+			rm $cache -rf
+			mkdir $cache -p
+			$pacman -Sc
+			_exit;
+		;;
+		O)
+			msg -m "Orphans:" -A "::"
+			pacman -Qm | awk '{print $1;}' > $cache/foreign.tmp
+			pacman -Qdt | grep -v "`cat $cache/foreign.tmp`" | awk '{print $1;}' > $cache/orphans.tmp
+			awk '{print "\t",$1;}' $cache/orphans.tmp
+			echo -ne "Remove orphan packages? (N/y/choose): ";
+			read -t 20 y;
+			o=""
+			while read pkg; do
+				o="$o $pkg";
+			done < $cache/orphans.tmp;
+			echo $o > $cache/orphans.tmp;
+			if [ "$y" == "choose" ]; then
+				o=""
+				IFS=" "
+				for pkg in $(cat $cache/orphans.tmp); do
+					echo -ne "\tRemove $pkg? (N/y): ";
+					read r < /dev/tty
+					if [ "$r" == "y" ]; then
+						o="$o $pkg"
+					fi;
+				done;
+				echo -e $o;
+				echo -e $o > $cache/orphans.tmp
+				y="y";
+			fi;
+			if [ "$y" == "y" ]; then
+				$pacman -R `cat $cache/orphans.tmp`;
+			fi;
+			_exit;
+		;;
+		l)
+			echo -e "$($pacman -Q | sed "
+				/^core/		s,.*,${CL}1;31m&${RS},
+				/^extra/	s,.*,${CL}0;32m&${RS},
+				/^community/	s,.*,${CL}1;35m&${RS},
+				/^archlinuxfr/	s,.*,${CL}1;30m&${RS},
+				/^multilib/	s,.*,${CL}0;33m&${RS},
+				/^omni/	s,.*,${CL}0;34m&${RS},
+				/^[^[:space:]]/	s,.*,${CL}0;36m&${RS},
+			")"
+			_exit;
+		;;
+		L)
+			echo -e "$($pacman -Qs | sed "
+				/^core/		s,.*,${CL}1;31m&${RS},
+				/^extra/	s,.*,${CL}0;32m&${RS},
+				/^community/	s,.*,${CL}1;35m&${RS},
+				/^[^[:space:]]/	s,.*,${CL}0;36m&${RS},
+			")"
+			_exit;
+		;;
+		Q)
+			cmd="$pacman -Qs $OPTARG";
+			echo -e "$($cmd | sed "
+				/^core/		s,.*,${CL}1;31m&${RS},
+				/^extra/	s,.*,${CL}0;32m&${RS},
+				/^community/	s,.*,${CL}1;35m&${RS},
+				/^archlinuxfr/	s,.*,${CL}1;30m&${RS},
+				/^multilib/	s,.*,${CL}0;33m&${RS},
+				/^omni/	s,.*,${CL}0;34m&${RS},
+				/^[^[:space:]]/	s,.*,${CL}0;36m&${RS},
+			")"
+			_exit;
+		;;
+		S)
+			echo -e "$($pacman -Ss $OPTARG | sed "
+				/^core/		s,.*,${CL}1;31m&${RS},
+				/^extra/	s,.*,${CL}0;32m&${RS},
+				/^community/	s,.*,${CL}1;35m&${RS},
+				/^archlinuxfr/	s,.*,${CL}1;30m&${RS},
+				/^multilib/	s,.*,${CL}0;33m&${RS},
+				/^omni/	s,.*,${CL}0;34m&${RS},
+				/^[^[:space:]]/	s,.*,${CL}0;36m&${RS},
+			")"
+			_exit;
+		;;
+		R)
+			cmd="$pacman -R $OPTARG";
+			$cmd;
+			_exit;
+		;;
+		i)
+			cmd="$pacman -U $OPTARG";
+			$cmd;
+			_exit;
+		;;
+		I)
+			cmd="$pacman -S $OPTARG";
+			$cmd;
+			_exit;
+		;;
+		U)	# Update the system and warn correctly
+			if [[ "$PACKAGE_MANAGER" == "yaourt" ]] || [[ "$PACKAGE_MANAGER" == "pacaur" ]]; then
+			# If using yaourt update aur packages as well
+				sudo $pacman -Syua;
+			else
+				if [ "$pacman" != "pacman" ]; then
+					if [ "`$pacman -Qm | wc -l`" != "0" ]; then
+					# If not using pacman and foreign packages are installed warn
+						if (which yaourt > /dev/null) || (which pacaur > /dev/null) ; then
+						# If yaourt is installed
+							msg -m "You have a AUR capable package manager installed. Maybe you should switch to that so you can update the AUR packages you have installed?";
+						else
+						# If yaourt is not installed
+							msg -m "Can't use $PACKAGE_MANAGER to update AUR packages, get yaourt and use that as your package manager if you want to be able to update them";
+						fi;
+					fi;
+				fi;
+				# Do a generic pacman style update
+				sudo $pacman -Syu;
+			fi;
+			_exit;
+		;;
+		s)	_stats;
+			_exit;
+		;;
+		h)	# Display the help message
+			_help;
+			_exit;
+		;;
+		:)	# Generic error if an arguement is missing
+			echo "Option -$OPTARG requires an arguement.";
+		;;
+		\?)	# What to do if an invalid arguement is passed
+			_help;
+			_exit;
+		;;
+	esac;
+done;
+

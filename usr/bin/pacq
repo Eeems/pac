@@ -1,0 +1,8 @@
+#!/bin/bash
+a="$@";
+if [ "$a" == "" ]; then
+	pac -L;
+else
+	cmd="pac -Q $@";
+	$cmd;
+fi;
