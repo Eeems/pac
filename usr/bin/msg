@@ -1,0 +1,43 @@
+#!/bin/bash
+OPEN="\\033["
+CLOSE="m"
+a="1;34";
+c="1;37";
+m="Example Message";
+A="==>"
+function _help(){
+	echo -e "Usage:
+	-c <Text Colour>
+	-a <Arrow Colour>
+	-h display this message
+	-A < Arrow String>
+	-m < Message String";
+}
+while getopts "A:m:c:a:h" optname; do
+	case "$optname" in
+		A)
+			A="$OPTARG"
+		;;
+		c)
+			c="$OPTARG"
+		;;
+		a)
+			a="$OPTARG"
+		;;
+		h)
+			_help;
+			exit 1
+		;;
+		m)
+			m="$OPTARG"
+		;;
+		:)
+			echo "Option -$OPTARG requires an arguement."
+		;;
+		\?)
+			_help;
+			exit 1
+		;;	
+	esac;
+done;
+echo -e "$OPEN$a$CLOSE$A$OPEN$c$CLOSE $m";
