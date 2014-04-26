@@ -88,8 +88,8 @@ Statistics:
 	Out of Date:		`$pacman -Qu | wc -l`
 	Foreign:		`$pacman -Qm | wc -l`
 	Available Packages	`$pacman -Ssq | wc -l`";
-	ls /var/lib/pacman/sync | while read dbp; do
-		db=${dbp:0:(-3)};
+	ls /var/lib/pacman/sync/*.db | while read dbp; do
+		db=$(basename ${dbp:0:(-3)});
 		case "$db" in
 			core)
 				c="1;31"
